@@ -1,0 +1,39 @@
+{
+  "name": "overleaf-latex",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Personal Overleaf MCP plugin for creating and editing LaTeX documents from ChatGPT and Codex",
+  "author": "MarcoDotIO",
+  "homepage": "https://github.com/MarcoDotIO/overleaf-latex#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/MarcoDotIO/overleaf-latex.git"
+  },
+  "bugs": { "url": "https://github.com/MarcoDotIO/overleaf-latex/issues" },
+  "keywords": ["overleaf", "latex", "mcp", "chatgpt", "codex", "pdf"],
+  "type": "module",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.test.json",
+    "test": "node --import tsx --test test/*.test.ts",
+    "check": "npm run typecheck && npm test && npm run build",
+    "start": "node dist/server.js",
+    "dev": "node --import tsx src/server.ts",
+    "login": "node --import tsx src/login.ts",
+    "http": "node dist/server.js --http",
+    "live-check": "node scripts/live-check.mjs"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.30.0",
+    "playwright": "1.63.0",
+    "ws": "^8.18.3",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@types/node": "^22.19.0",
+    "@types/ws": "^8.18.1",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3"
+  }
+}

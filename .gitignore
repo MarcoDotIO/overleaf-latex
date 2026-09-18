@@ -1,0 +1,13 @@
+node_modules/
+dist/
+.env
+.env.*
+!.env.example
+*.log
+session.json
+storage-state.json
+*cookie*.txt
+*.har
+playwright/.auth/
+artifacts/
+.DS_Store
