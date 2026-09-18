@@ -3,6 +3,7 @@
 **Create, edit, and compile LaTeX in your Overleaf account from ChatGPT, Codex, or an MCP client.**
 
 [![CI](https://github.com/MarcoDotIO/overleaf-latex/actions/workflows/ci.yml/badge.svg)](https://github.com/MarcoDotIO/overleaf-latex/actions/workflows/ci.yml)
+[![Plugin Security Scan](https://github.com/MarcoDotIO/overleaf-latex/actions/workflows/plugin-security.yml/badge.svg)](https://github.com/MarcoDotIO/overleaf-latex/actions/workflows/plugin-security.yml)
 [![Node.js 22+](https://img.shields.io/badge/Node.js-22%2B-339933?logo=nodedotjs&logoColor=white)](https://nodejs.org/)
 [![MCP](https://img.shields.io/badge/MCP-compatible-287A38)](https://modelcontextprotocol.io/)
 
@@ -134,6 +135,7 @@ This creates and edits a real test project. See the [evaluation guide](docs/eval
 | --- | --- |
 | [ChatGPT setup](docs/chatgpt-setup.md) | Google sign-in, Secure MCP Tunnel, connection setup, and troubleshooting. |
 | [Architecture](docs/architecture.md) | Authentication, transport, document protocols, and compatibility details. |
+| [Security policy](SECURITY.md) | Private vulnerability reporting, supported revisions, and authorization boundaries. |
 | [Evaluation](docs/evaluation.md) | Verification evidence and repeatable local and live checks. |
 | [Overleaf skill](skills/overleaf/SKILL.md) | The bundled workflow for creating, editing, compiling, and delivering documents. |
 
