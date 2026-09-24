@@ -1,4 +1,6 @@
 import { createHash } from 'node:crypto';
+import { planPatches, buildPatchOperation, type TextPatch, type PatchPlan } from './patches.js';
+import { readOutputSlice as readSlice } from './output-slices.js';
 import { buildCookieHeader, loadSession } from './session.js';
 import { AUTH_MESSAGE, connectRealtime, OverleafError, type RealtimeConnection, type SocketFactory } from './realtime.js';
 
@@ -73,18 +75,53 @@ export class OverleafClient {
   }
 
   async writeDocument(projectId: string, documentId: string, content: string, expectedVersion: number): Promise<DocumentSnapshot & { applied: boolean; concurrentChanges: boolean }> {
+    validateContent(content);
+    return this.updateDocument(projectId, documentId, expectedVersion, current => {
+      validateContent(content);
+      content = content.replace(/\r\n?/g, '\n');
+      return { content, op: buildTextOperation(current.content, content, current.type) };
+    });
+  }
+
+  async patchDocument(projectId: string, documentId: string, patches: TextPatch[], expectedVersion: number) {
+    return this.updateDocument(projectId, documentId, expectedVersion, current => {
+      const plan = planPatches(current.content, patches);
+      validateContent(plan.content);
+      return { content: plan.content, op: buildPatchOperation(current.content, plan.ranges, current.type) };
+    });
+  }
+
+  async restoreDocument(projectId: string, documentId: string, content: string, expectedVersion: number, forward: PatchPlan['ranges']) {
+    return this.updateDocument(projectId, documentId, expectedVersion, current => {
+      let delta = 0;
+      const inverse: PatchPlan['ranges'] = [];
+      for (const range of forward) {
+        const start = range.start + delta;
+        const replacement = content.slice(range.start, range.end);
+        if (current.content.slice(start, start + range.replacement.length) !== range.replacement) throw new OverleafError('VERSION_CONFLICT', 'Recovery source no longer matches the saved edit.');
+        delta += range.replacement.length - (range.end - range.start);
+        const item = { start, end: start + range.replacement.length, replacement };
+        const previous = inverse.at(-1);
+        if (previous && previous.end === item.start) { previous.end = item.end; previous.replacement += item.replacement; }
+        else inverse.push(item);
+      }
+      let restored = current.content;
+      for (const range of [...inverse].reverse()) restored = restored.slice(0, range.start) + range.replacement + restored.slice(range.end);
+      if (restored !== content) throw new OverleafError('VERSION_CONFLICT', 'Recovery would change source outside the saved edit.');
+      return { content, op: buildPatchOperation(current.content, inverse, current.type) };
+    });
+  }
+
+  private async updateDocument(projectId: string, documentId: string, expectedVersion: number, prepare: (current: DocumentSnapshot) => {content: string; op: unknown[]}): Promise<DocumentSnapshot & { applied: boolean; concurrentChanges: boolean }> {
     validateId(documentId);
     if (!Number.isSafeInteger(expectedVersion) || expectedVersion < 0) throw new OverleafError('INVALID_VERSION', 'Provide the document version returned by read_document.');
-    validateContent(content);
-    // Overleaf stores normalized document lines. Normalize once before both OT and verification.
-    content = content.replace(/\r\n?/g, '\n');
     return this.withProject(projectId, async socket => {
       const current = await this.joinDocument(socket, documentId);
       if (current.version !== expectedVersion) {
         throw new OverleafError('VERSION_CONFLICT', `The document changed: expected version ${expectedVersion}, current version ${current.version}. Read it again and merge your edit; nothing was written.`);
       }
+      const { content, op } = prepare(current);
       if (current.content === content) return { ...current, applied: false, concurrentChanges: false };
-      const op = buildTextOperation(current.content, content, current.type);
       let timer: NodeJS.Timeout | undefined;
       const unsubscribers: (() => void)[] = [];
       const applied = new Promise<void>((resolve, reject) => {
@@ -129,7 +166,7 @@ export class OverleafClient {
     validateId(projectId);
     if (options.rootDocId) validateId(options.rootDocId);
     const result = await this.json(`/project/${projectId}/compile?file_line_errors=true`, {
-      stopOnFirstError: options.stopOnFirstError ?? false,
+      stopOnFirstError: options.stopOnFirstError ?? true,
       ...(options.compiler ? { compiler: options.compiler } : {}),
       ...(options.rootDocId ? { rootDoc_id: options.rootDocId } : {}),
     }, 180_000);
@@ -150,6 +187,12 @@ export class OverleafClient {
     if (!Number.isSafeInteger(maxBytes) || maxBytes < 1 || maxBytes > 50 * 1024 * 1024) throw new OverleafError('INVALID_LIMIT', 'Output limit must be between 1 byte and 50 MB.');
     const response = await this.request(url.pathname + url.search, undefined, this.timeoutMs);
     return { data: await readLimited(response, maxBytes), contentType: response.headers.get('content-type') ?? 'application/octet-stream' };
+  }
+
+  async readOutputSlice(projectId: string, outputUrl: string, offset = 0, length = 65536) {
+    const url = trustedOutputUrl(projectId, outputUrl);
+    const response = await this.request(url.pathname + url.search, undefined, this.timeoutMs);
+    return readSlice(response, offset, length);
   }
 
   private async createEntity(projectId: string, kind: 'doc' | 'folder', name: string, parentFolderId?: string): Promise<JsonObject> {

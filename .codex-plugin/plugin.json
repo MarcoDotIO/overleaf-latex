@@ -1,6 +1,6 @@
 {
   "name": "overleaf-latex",
-  "version": "0.1.0+codex.20260918164435",
+  "version": "0.2.0+codex.20260924182216",
   "description": "Create, edit and compile LaTeX documents in your signed-in Overleaf account.",
   "author": {
     "name": "MarcoDotIO",
@@ -10,7 +10,7 @@
   "interface": {
     "displayName": "Overleaf LaTeX",
     "shortDescription": "Create and compile LaTeX in Overleaf.",
-    "longDescription": "Work with your Overleaf projects through nine MCP tools: find and create projects, read and edit source with version checks, organize files, compile LaTeX, and retrieve PDFs and logs. Uses your locally saved Overleaf browser session, including accounts signed in through Google. An independent personal integration.",
+    "longDescription": "Work with your Overleaf projects through thirteen MCP tools: create projects, initialize empty files, apply bounded versioned edits with strict compilation and conditional recovery, inspect private checkpoints, and retrieve current PDFs or paginated logs. Uses a locally saved Overleaf session, including Google sign-in. An independent personal integration.",
     "developerName": "MarcoDotIO",
     "websiteURL": "https://github.com/MarcoDotIO/overleaf-latex",
     "category": "Productivity",

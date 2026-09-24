@@ -1,6 +1,6 @@
 {
   "name": "overleaf-latex",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "Personal Overleaf MCP plugin for creating and editing LaTeX documents from ChatGPT and Codex",
   "author": "MarcoDotIO",
@@ -9,10 +9,21 @@
     "type": "git",
     "url": "git+https://github.com/MarcoDotIO/overleaf-latex.git"
   },
-  "bugs": { "url": "https://github.com/MarcoDotIO/overleaf-latex/issues" },
-  "keywords": ["overleaf", "latex", "mcp", "chatgpt", "codex", "pdf"],
+  "bugs": {
+    "url": "https://github.com/MarcoDotIO/overleaf-latex/issues"
+  },
+  "keywords": [
+    "overleaf",
+    "latex",
+    "mcp",
+    "chatgpt",
+    "codex",
+    "pdf"
+  ],
   "type": "module",
-  "engines": { "node": ">=22" },
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.test.json",
@@ -22,7 +33,8 @@
     "dev": "node --import tsx src/server.ts",
     "login": "node --import tsx src/login.ts",
     "http": "node dist/server.js --http",
-    "live-check": "node scripts/live-check.mjs"
+    "live-check": "node scripts/live-check.mjs",
+    "check:latex": "npm run build && node scripts/checked-edit-local.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.30.0",

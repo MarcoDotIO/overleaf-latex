@@ -3,6 +3,7 @@ import { EventEmitter } from 'node:events';
 import { createHash } from 'node:crypto';
 import test from 'node:test';
 import { OverleafClient, OverleafError, OVERLEAF_ORIGIN, buildTextOperation, extractMeta, trustedOutputUrl } from '../src/overleaf-client.js';
+import { planPatches, PatchError } from '../src/patches.js';
 import type { RealtimeConnection } from '../src/realtime.js';
 import { sessionFromCookieHeader } from '../src/session.js';
 
@@ -41,6 +42,61 @@ function fromSocket(socket: FakeSocket, timeoutMs = 300): OverleafClient {
 function snapshot(content: string, version = 4, type = 'history-ot'): unknown[] {
   const lines = type === 'history-ot' ? { content, comments: {}, trackedChanges: [] } : content.split('\n').map(line => Buffer.from(line).toString('latin1'));
   return [lines, version, [], {}, type];
+}
+
+function applyOperation(before: string, operation: unknown[], type: 'history-ot' | 'sharejs-text-ot'): string {
+  if (type === 'sharejs-text-ot') {
+    let content = before;
+    for (const component of operation as { p: number; d?: string; i?: string }[]) {
+      assert.equal(wellFormed(content.slice(0, component.p)), true);
+      if (component.d !== undefined) {
+        assert.equal(content.slice(component.p, component.p + component.d.length), component.d);
+        assert.equal(wellFormed(component.d), true);
+        content = content.slice(0, component.p) + content.slice(component.p + component.d.length);
+      }
+      if (component.i !== undefined) content = content.slice(0, component.p) + component.i + content.slice(component.p);
+      assert.equal(wellFormed(content), true);
+    }
+    return content;
+  }
+  let cursor = 0;
+  let content = '';
+  for (const component of (operation[0] as { textOperation: (number | string)[] }).textOperation) {
+    if (typeof component === 'string') content += component;
+    else {
+      const fragment = before.slice(cursor, cursor + Math.abs(component));
+      assert.equal(wellFormed(fragment), true);
+      if (component > 0) content += fragment;
+      cursor += Math.abs(component);
+    }
+  }
+  assert.equal(cursor, before.length);
+  assert.equal(wellFormed(content), true);
+  return content;
+}
+
+function documentServer(content: string, type: 'history-ot' | 'sharejs-text-ot') {
+  const state = { content, version: 4 };
+  const sockets: FakeSocket[] = [];
+  const operations: unknown[][] = [];
+  const client = new OverleafClient({ loadSession, socketFactory: async () => {
+    const socket = new FakeSocket(async (event, args) => {
+      if (event === 'joinDoc') return snapshot(state.content, state.version, type);
+      assert.equal(event, 'applyOtUpdate');
+      assert.equal(args[0], documentId);
+      const update = args[1] as { doc: string; v: number; op: unknown[] };
+      assert.equal(update.doc, documentId);
+      assert.equal(update.v, state.version);
+      operations.push(update.op);
+      state.content = applyOperation(state.content, update.op, type);
+      state.version++;
+      queueMicrotask(() => socket.events.emit('otUpdateApplied', { doc: documentId, v: update.v }));
+      return [];
+    });
+    sockets.push(socket);
+    return socket;
+  } });
+  return { state, client, sockets, operations };
 }
 
 test('list projects uses authenticated GET, fixed origin, and manual redirects', async () => {
@@ -195,6 +251,89 @@ test('invalid content and expected versions reject before opening a project', as
 });
 
 for (const type of ['history-ot', 'sharejs-text-ot'] as const) {
+  test(`${type} bounded patches and recovery roundtrip distant Unicode changes without rewriting the gap`, async () => {
+    const gap = '\\newcommand{\\custommacro}{Shared α😀}\n'.repeat(100);
+    const before = `FIRST😀\n${gap}\nLAST中`;
+    const patches = [{ search: 'LAST中', replace: 'END😃' }, { search: 'FIRST😀', replace: 'START' }];
+    const plan = planPatches(before, patches);
+    const server = documentServer(before, type);
+    const changed = await server.client.patchDocument(projectId, documentId, patches, 4);
+    assert.equal(changed.content, plan.content);
+    assert.equal(changed.version, 5);
+    assert.equal(changed.applied, true);
+    assert.equal(changed.concurrentChanges, false);
+    const restored = await server.client.restoreDocument(projectId, documentId, before, changed.version, plan.ranges);
+    assert.equal(restored.content, before);
+    assert.equal(restored.version, 6);
+    assert.equal(restored.applied, true);
+    assert.equal(restored.concurrentChanges, false);
+    assert.equal(server.operations.length, 2);
+    for (const operation of server.operations) assert.doesNotMatch(JSON.stringify(operation), /custommacro|Shared/);
+    assert.ok(server.sockets.every(socket => socket.closed && socket.events.eventNames().length === 0));
+  });
+
+  test(`${type} recovery restores adjacent deletions and insertions at the same inverse offset`, async () => {
+    for (const patches of [
+      [{ search: 'A😀', replace: '' }, { search: 'B中', replace: '' }],
+      [{ search: 'A😀', replace: '' }, { search: 'B中', replace: 'replacement😃' }],
+    ]) {
+      const before = 'A😀B中 untouched tail';
+      const plan = planPatches(before, patches);
+      const server = documentServer(before, type);
+      const changed = await server.client.patchDocument(projectId, documentId, patches, 4);
+      const restored = await server.client.restoreDocument(projectId, documentId, before, changed.version, plan.ranges);
+      assert.equal(restored.content, before);
+      assert.equal(restored.version, 6);
+      assert.equal(server.operations.length, 2);
+      for (const operation of server.operations) assert.doesNotMatch(JSON.stringify(operation), /untouched tail/);
+    }
+  });
+
+  test(`${type} stale patch or recovery versions preserve collaborator changes`, async () => {
+    const before = 'A😀 untouched text B中';
+    const patches = [{ search: 'A😀', replace: 'Z' }];
+    const plan = planPatches(before, patches);
+    const server = documentServer(before, type);
+    await assert.rejects(server.client.patchDocument(projectId, documentId, patches, 3), errorCode('VERSION_CONFLICT'));
+    assert.equal(server.operations.length, 0);
+    await server.client.patchDocument(projectId, documentId, patches, 4);
+    server.state.content += ' collaborator addition';
+    server.state.version++;
+    const collaboratorContent = server.state.content;
+    await assert.rejects(server.client.restoreDocument(projectId, documentId, before, 5, plan.ranges), errorCode('VERSION_CONFLICT'));
+    assert.equal(server.state.content, collaboratorContent);
+    assert.equal(server.operations.length, 1);
+    assert.ok(server.sockets.every(socket => socket.closed));
+  });
+}
+
+test('patch planning errors never enqueue an update', async () => {
+  for (const patches of [
+    [{ search: 'missing', replace: 'x' }],
+    [{ search: 'abc', replace: '' }],
+    [{ search: 'a', replace: 'x'.repeat(200) }],
+  ]) {
+    const server = documentServer('abc', 'history-ot');
+    await assert.rejects(server.client.patchDocument(projectId, documentId, patches, 4), error => error instanceof PatchError);
+    assert.equal(server.operations.length, 0);
+    assert.equal(server.state.content, 'abc');
+    assert.ok(server.sockets.every(socket => socket.closed));
+  }
+});
+
+test('recovery rejects changed patch content and changes outside saved hunks even at the supplied version', async () => {
+  const before = 'A😀 untouched text B中';
+  const plan = planPatches(before, [{ search: 'A😀', replace: 'Z' }]);
+  for (const content of [plan.content.replace('Z', 'X'), plan.content + ' collaborator addition']) {
+    const server = documentServer(content, 'history-ot');
+    await assert.rejects(server.client.restoreDocument(projectId, documentId, before, 4, plan.ranges), errorCode('VERSION_CONFLICT'));
+    assert.equal(server.operations.length, 0);
+    assert.equal(server.state.content, content);
+    assert.ok(server.sockets.every(socket => socket.closed));
+  }
+});
+
+for (const type of ['history-ot', 'sharejs-text-ot'] as const) {
   test(`${type} write waits for queue AND own applied acknowledgement, then verifies`, async () => {
     let joins = 0;
     let queueResolve!: (value: unknown[]) => void;
@@ -276,6 +415,18 @@ test('compile follows reference fields and carries routing parameters to safe ou
   const result = await client.compileProject(projectId, { compiler: 'xelatex', rootDocId: documentId, stopOnFirstError: true });
   assert.equal(result.outputFiles.length, 2);
   assert.equal(result.outputFiles[0]?.url, `${OVERLEAF_ORIGIN}${output}?clsiserverid=server-1&compileGroup=priority`);
+});
+
+test('compilation stops on the first error by default while allowing explicit legacy behavior', async () => {
+  const observed: unknown[] = [];
+  const client = new OverleafClient({ loadSession, fetch: async (url, init) => {
+    if (String(url) === `${OVERLEAF_ORIGIN}/project`) return csrfPage();
+    observed.push(JSON.parse(String(init?.body)));
+    return json({ status: 'success', outputFiles: [] });
+  } });
+  await client.compileProject(projectId);
+  await client.compileProject(projectId, { stopOnFirstError: false });
+  assert.deepEqual(observed, [{ stopOnFirstError: true }, { stopOnFirstError: false }]);
 });
 
 test('output allowlist permits reference routes but blocks foreign origins and traversal', async () => {

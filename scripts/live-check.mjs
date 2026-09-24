@@ -52,48 +52,44 @@ try {
     console.log(`Created ${receipt.projectUrl}`);
   }
   const project = { project_id: receipt.projectId };
-  const tree = await data('get_project', project);
-  receipt.rootDocumentId = tree.rootDoc_id;
-  if (!receipt.rootDocumentId) throw new Error('Project has no root document. Open it in Overleaf to choose main.tex.');
-  if (!receipt.folderId) {
-    receipt.folderId = entityId(await data('create_folder', { ...project, name: 'sections' }));
-    await save('folder_created');
+  // Use dedicated empty files; never replace an existing template or user source.
+  for (const [key, name] of [['checkedPreambleId', 'mcp-checked-preamble.tex'], ['checkedRootId', 'mcp-checked-main.tex']]) {
+    if (!receipt[key]) {
+      receipt[key] = entityId(await data('create_document', { ...project, name }));
+      await save(`${key}_created`);
+    }
   }
-  if (!receipt.sectionDocumentId) {
-    receipt.sectionDocumentId = entityId(await data('create_document', { ...project, name: 'verification.tex', parent_folder_id: receipt.folderId }));
-    await save('section_created');
-  }
-  const section = { ...project, document_id: receipt.sectionDocumentId };
-  const beforeSection = await data('read_document', section);
-  await data('write_document', { ...section, expected_version: beforeSection.version, content: '\\section{Connection verified}\nThis document was created, edited, and compiled through the Overleaf MCP plugin.\nThe login uses the owner\'s normal Google sign-in to Overleaf.\n' });
-  const document = { ...project, document_id: receipt.rootDocumentId };
-  const before = await data('read_document', document);
+  const preamble = String.raw`\newcommand{\mcpmetric}[1]{\mathsf{#1}}
+`;
   const latex = String.raw`\documentclass{article}
-\usepackage[T1]{fontenc}
-\usepackage{amsmath}
-\usepackage[margin=1in]{geometry}
-\title{Overleaf Plugin Verification}
-\author{Created with ChatGPT}
-\date{\today}
+\input{mcp-checked-preamble}
 \begin{document}
-\maketitle
-\input{sections/verification.tex}
-\section{LaTeX compilation}
-The plugin supports complete LaTeX documents, equations, and included source files.
-For example, the Monte Carlo estimate of an expectation is
-\[
-  \widehat{\mu}_N = \frac{1}{N}\sum_{i=1}^{N} f(X_i).
-\]
-Source updates are submitted with a document version and checked after Overleaf confirms application.
+\section{Checked edit verification}
+The measured quantity is $\mcpmetric{x}$.
+This is a disposable MCP acceptance document.
 \end{document}
 `;
-  const after = await data('write_document', { ...document, content: latex, expected_version: before.version });
-  receipt.documentVersion = after.version;
-  receipt.documentType = after.type;
-  receipt.verifiedContent = after.content === latex;
-  if (!receipt.verifiedContent) throw new Error('Concurrent changes detected; inspect the test document before continuing.');
-  await save('source_verified');
-  const compile = await data('compile_project', project);
+  for (const [id, content] of [[receipt.checkedPreambleId, preamble], [receipt.checkedRootId, latex]]) {
+    const before = await data('read_document', { ...project, document_id: id });
+    if (!before.content) await data('write_document', { ...project, document_id: id, content, expected_version: before.version });
+    else if (before.content !== content) throw new Error('The dedicated test source differs from its fixture. Inspect it and recovery checkpoints before resuming.');
+  }
+  const before = await data('read_document', { ...project, document_id: receipt.checkedPreambleId });
+  // Deliberately break only the disposable preamble, then require conditional recovery.
+  const broken = await client.callTool({ name: 'overleaf_edit_project', arguments: {
+    ...project, root_document_id: receipt.checkedRootId,
+    changes: [{ document_id: receipt.checkedPreambleId, expected_version: before.version, expected_hash: before.hash,
+      patches: [{ search: '\\newcommand{\\mcpmetric}', replace: '\\newcommand{\\mcprenamedmetric}' }] }],
+  } }, undefined, { timeout: 600_000 });
+  const recovery = broken.structuredContent?.result;
+  receipt.recoveryStatus = recovery?.status;
+  receipt.checkpointId = recovery?.checkpoint_id;
+  await save('recovery_checked');
+  if (recovery?.status !== 'rolled_back') throw new Error('The recovery scenario needs attention; inspect its checkpoint before retrying.');
+  const after = await data('read_document', { ...project, document_id: receipt.checkedPreambleId });
+  if (after.content !== preamble) throw new Error('Recovered preamble did not match the fixture.');
+  receipt.verifiedContent = true;
+  const compile = await data('compile_project', { ...project, root_document_id: receipt.checkedRootId });
   receipt.compileStatus = compile.status;
   const log = compile.outputFiles?.find(file => file.path === 'output.log');
   if (log) {
