@@ -1,13 +1,13 @@
 # Overleaf LaTeX
 
-**Create, edit, and compile LaTeX in your Overleaf account from ChatGPT, Codex, or an MCP client.**
+**Create, edit, and compile LaTeX in your Overleaf account from Claude Code, ChatGPT, Codex, or an MCP client.**
 
 [![CI](https://github.com/MarcoDotIO/overleaf-latex/actions/workflows/ci.yml/badge.svg)](https://github.com/MarcoDotIO/overleaf-latex/actions/workflows/ci.yml)
 [![Plugin Security Scan](https://github.com/MarcoDotIO/overleaf-latex/actions/workflows/plugin-security.yml/badge.svg)](https://github.com/MarcoDotIO/overleaf-latex/actions/workflows/plugin-security.yml)
 [![Node.js 22+](https://img.shields.io/badge/Node.js-22%2B-339933?logo=nodedotjs&logoColor=white)](https://nodejs.org/)
 [![MCP](https://img.shields.io/badge/MCP-compatible-287A38)](https://modelcontextprotocol.io/)
 
-Bring a document from a prompt to a compiled PDF while keeping the project in Overleaf. This repository includes thirteen MCP tools, a local login helper, and a Codex plugin with an `$overleaf` workflow skill.
+Bring a document from a prompt to a compiled PDF while keeping the project in Overleaf. This repository includes thirteen MCP tools, a local login helper, and plugin packages for Claude Code and Codex that share one Overleaf workflow skill.
 
 > Create an Overleaf project named “Research Notes”. Write a complete LaTeX article explaining Monte Carlo estimation, with an equation and a worked example. Compile it, fix any errors, and return the project link and PDF.
 
@@ -26,7 +26,7 @@ This is an independent, single-user integration for **www.overleaf.com**, built 
 
 ## Quick start
 
-You need **Node.js 22+**, npm, an Overleaf account, and Chrome or Playwright Chromium.
+You need **Node.js 22+**, npm, an Overleaf account, and Chrome or Playwright Chromium. In Claude Code, you can [install the plugin directly](#claude-code) instead; it needs no clone or build.
 
 ```sh
 git clone https://github.com/MarcoDotIO/overleaf-latex.git
@@ -48,6 +48,22 @@ If no supported browser is installed, run `npx playwright install chromium` and 
 
 ## Connect your assistant
 
+### Claude Code
+
+Add this repository as a plugin marketplace, install the plugin, and sign in:
+
+```text
+/plugin marketplace add MarcoDotIO/overleaf-latex
+/plugin install overleaf-latex@overleaf-latex
+/overleaf-latex:login
+```
+
+From a terminal, the first two steps are `claude plugin marketplace add MarcoDotIO/overleaf-latex` and `claude plugin install overleaf-latex@overleaf-latex`. Claude Code installs the plugin's npm dependencies itself; no build step is needed. The manifests are [`.claude-plugin/plugin.json`](.claude-plugin/plugin.json) and [`.claude-plugin/marketplace.json`](.claude-plugin/marketplace.json).
+
+`/overleaf-latex:login` runs the bundled login helper: a browser window opens for **Log in with Google**, and Claude checks the saved session afterwards. It also accepts `--check`, `--logout`, and `--import-cookie-file <path>`. The session file is the same one `npm run login` writes, so one sign-in covers every client on the computer.
+
+Then ask for Overleaf work in plain language. The `overleaf` skill loads when relevant, or invoke it with `/overleaf-latex:overleaf`. To try a local checkout without installing it, start Claude Code with `claude --plugin-dir /absolute/path/to/overleaf-latex`.
+
 ### Local MCP clients and Codex
 
 Add the following to your client's MCP configuration, replacing the server path with the absolute path to your checkout:
@@ -63,7 +79,7 @@ Add the following to your client's MCP configuration, replacing the server path 
 }
 ```
 
-For a Codex plugin installation, this repository includes [`.codex-plugin/plugin.json`](.codex-plugin/plugin.json), [`.mcp.json`](.mcp.json), and the [Overleaf skill](skills/overleaf/SKILL.md). Once the local plugin is installed in a compatible client, start a new task and invoke `$overleaf`. A plain MCP connection exposes the tools; it does not install the skill.
+For a Codex plugin installation, this repository includes [`.codex-plugin/plugin.json`](.codex-plugin/plugin.json), [`.mcp.json`](.mcp.json), and the [Overleaf skill](skills/overleaf/SKILL.md). Run `npm ci` in the checkout before installing it: the plugin launches the prebuilt [`bundle/overleaf-mcp.mjs`](bundle/overleaf-mcp.mjs), which loads its packages from `node_modules`. Once the local plugin is installed in a compatible client, start a new task and invoke `$overleaf`. A plain MCP connection exposes the tools; it does not install the skill.
 
 The default transport is **stdio**. Clients that require local Streamable HTTP can use `npm run http`, which listens at `http://127.0.0.1:3333/mcp`. This listener is for trusted local clients and must not be exposed as a public endpoint.
 
@@ -116,13 +132,13 @@ Edit checkpoints contain original affected source and recovery state. They persi
 - **Expect compatibility changes.** Overleaf can change its internal hosted interfaces independently of this integration or its public source repository.
 - **Check the result.** Updating source, compiling successfully, and retrieving a PDF are separate steps. Inspect the compilation status and log before claiming a finished document.
 
-Run `npm run login` again when the session expires. To delete the plugin's saved local session:
+Run `npm run login` (or `/overleaf-latex:login` in Claude Code) again when the session expires. To delete the plugin's saved local session:
 
 ```sh
 npm run login -- --logout
 ```
 
-This removes the local session file without revoking other Overleaf browser sessions. Stop the MCP server and tunnel when disconnecting the integration.
+In Claude Code, use `/overleaf-latex:login --logout`. This removes the local session file without revoking other Overleaf browser sessions. Stop the MCP server and tunnel when disconnecting the integration.
 
 ## Development and verification
 
@@ -130,7 +146,7 @@ This removes the local session file without revoking other Overleaf browser sess
 npm run check
 ```
 
-This runs TypeScript checks, the automated test suite, and a production build. New regression coverage exercises bounded patches, baseline failure, conditional recovery, collaborator changes, log pagination, and stale PDF rejection. See the [evaluation guide](docs/evaluation.md) for evidence and remaining acceptance checks.
+This runs TypeScript checks, the automated test suite, a production build, and `npm run bundle`, which regenerates the plugin entry points in [`bundle/`](bundle). Plugin installs run those committed files instead of building, so commit `bundle/` whenever `src/` changes; a test and CI fail when it is stale. New regression coverage exercises bounded patches, baseline failure, conditional recovery, collaborator changes, log pagination, and stale PDF rejection. See the [evaluation guide](docs/evaluation.md) for evidence and remaining acceptance checks.
 
 The [September 18 hosted verification](docs/evaluation.md#verified-on-september-18-2026) exercised the original nine-tool version and produced a visually checked one-page PDF. The [September 24 edit-safety review](docs/edit-safety-review.md) also describes the original behavior, before these fixes. Neither record establishes hosted validation of the new thirteen-tool workflow. The new [local 51-page regression](docs/evaluation.md#local-long-paper-regression-september-24-2026) passed with real strict TeX compilation, the actual plugin/MCP, and simulated Overleaf transport: a chapter edit compiled, a broken shared macro was restored automatically, and recovery compiled successfully. Run `npm run check:latex` with Tectonic available to reproduce it.
 
@@ -144,7 +160,7 @@ This creates and edits a real test project. See the [evaluation guide](docs/eval
 
 ### Upgrade an existing installation
 
-Version **0.2.0** changes `overleaf_write_document` to initialization only; clients editing existing content must use `overleaf_edit_project`. After updating the checkout, run `npm ci` and `npm run build`. Restart the MCP server or tunnel, refresh the ChatGPT connection's tools, and confirm that discovery lists thirteen tools, including `overleaf_edit_project`. For a packaged Codex plugin, update or reinstall the package containing the new build and skill, then start a new task. A running process or previously cached tool schema does not pick up rebuilt files automatically.
+Version **0.2.0** changes `overleaf_write_document` to initialization only; clients editing existing content must use `overleaf_edit_project`. After updating the checkout, run `npm ci` and `npm run build`. Restart the MCP server or tunnel, refresh the ChatGPT connection's tools, and confirm that discovery lists thirteen tools, including `overleaf_edit_project`. For a packaged Codex plugin, update or reinstall the package containing the new build and skill, then start a new task. For Claude Code, run `claude plugin marketplace update overleaf-latex` and `claude plugin update overleaf-latex@overleaf-latex`, then restart Claude Code. Claude Code only installs a new copy when `version` in `.claude-plugin/plugin.json` changes, so bump it together with `package.json` when publishing. A running process or previously cached tool schema does not pick up rebuilt files automatically.
 
 ## Documentation
 
@@ -155,5 +171,6 @@ Version **0.2.0** changes `overleaf_write_document` to initialization only; clie
 | [Security policy](SECURITY.md) | Private vulnerability reporting, supported revisions, and authorization boundaries. |
 | [Evaluation](docs/evaluation.md) | Verification evidence and repeatable local and live checks. |
 | [Overleaf skill](skills/overleaf/SKILL.md) | The bundled workflow for creating, editing, compiling, and delivering documents. |
+| [Claude Code login command](commands/login.md) | How `/overleaf-latex:login` runs the login helper. |
 
 For bugs and feature requests, [open an issue](https://github.com/MarcoDotIO/overleaf-latex/issues) with reproduction steps and redacted error details. Keep session files and private document contents out of reports.

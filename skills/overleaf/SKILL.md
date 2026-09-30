@@ -5,7 +5,7 @@ description: Create, edit, and compile LaTeX documents in the user's connected O
 
 # Overleaf
 
-Use the `overleaf_*` MCP tools for the connected account on `www.overleaf.com`. Discover exact argument schemas from the available tools. Local sign-in uses the user's Google login in a browser; a saved Overleaf session is already expected. Never ask for passwords, cookies, or tokens in chat. If authentication fails, direct the user to the plugin's local `npm run login` command.
+Use the `overleaf_*` MCP tools for the connected account on `www.overleaf.com`. Discover exact argument schemas from the available tools. Local sign-in uses the user's Google login in a browser; a saved Overleaf session is already expected. Never ask for passwords, cookies, or tokens in chat. If authentication fails, direct the user to sign in locally: `/overleaf-latex:login` in Claude Code, or `npm run login` from the plugin's source checkout.
 
 ## Existing source
 

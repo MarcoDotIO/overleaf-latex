@@ -81,7 +81,7 @@ export async function loadSession(filePath = getSessionPath()): Promise<SavedSes
     return validateSession(parsed);
   } catch (error) {
     if (isObject(error) && error.code === 'ENOENT') {
-      throw new Error('No saved Overleaf session. Run npm run login first.');
+      throw new Error('No saved Overleaf session. Run npm run login first (in Claude Code: /overleaf-latex:login).');
     }
     if (isObject(error) && error.code === 'ELOOP') {
       throw new Error('The Overleaf session file must not be a symbolic link.');

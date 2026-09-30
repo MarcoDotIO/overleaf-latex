@@ -1,0 +1,19 @@
+{
+  "name": "overleaf-latex",
+  "owner": {
+    "name": "MarcoDotIO",
+    "url": "https://github.com/MarcoDotIO"
+  },
+  "metadata": {
+    "description": "Overleaf LaTeX plugin for Claude Code: create, edit and compile documents in your Overleaf account."
+  },
+  "plugins": [
+    {
+      "name": "overleaf-latex",
+      "source": "./",
+      "description": "Create, edit and compile LaTeX documents in your signed-in Overleaf account.",
+      "category": "productivity",
+      "homepage": "https://github.com/MarcoDotIO/overleaf-latex"
+    }
+  ]
+}

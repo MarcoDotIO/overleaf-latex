@@ -2,7 +2,7 @@
   "name": "overleaf-latex",
   "version": "0.2.0",
   "private": true,
-  "description": "Personal Overleaf MCP plugin for creating and editing LaTeX documents from ChatGPT and Codex",
+  "description": "Personal Overleaf MCP plugin for creating and editing LaTeX documents from ChatGPT, Codex, and Claude Code",
   "author": "MarcoDotIO",
   "homepage": "https://github.com/MarcoDotIO/overleaf-latex#readme",
   "repository": {
@@ -18,6 +18,7 @@
     "mcp",
     "chatgpt",
     "codex",
+    "claude-code",
     "pdf"
   ],
   "type": "module",
@@ -26,9 +27,10 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
+    "bundle": "node scripts/bundle.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.test.json",
     "test": "node --import tsx --test test/*.test.ts",
-    "check": "npm run typecheck && npm test && npm run build",
+    "check": "npm run typecheck && npm test && npm run build && npm run bundle",
     "start": "node dist/server.js",
     "dev": "node --import tsx src/server.ts",
     "login": "node --import tsx src/login.ts",
@@ -45,6 +47,7 @@
   "devDependencies": {
     "@types/node": "^22.19.0",
     "@types/ws": "^8.18.1",
+    "esbuild": "0.28.2",
     "tsx": "^4.21.0",
     "typescript": "^5.9.3"
   }

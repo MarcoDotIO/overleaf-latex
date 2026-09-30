@@ -2,8 +2,8 @@
   "mcpServers": {
     "overleaf": {
       "command": "node",
-      "args": ["${PLUGIN_ROOT}/dist/server.js"],
-      "cwd": "${PLUGIN_ROOT}"
+      "args": ["./bundle/overleaf-mcp.mjs"],
+      "cwd": "."
     }
   }
 }

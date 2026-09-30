@@ -1,0 +1,18 @@
+{
+  "name": "overleaf-latex",
+  "version": "0.2.0",
+  "description": "Create, edit and compile LaTeX documents in your signed-in Overleaf account: bounded versioned edits with strict compilation and conditional recovery, paginated logs, and verified PDFs.",
+  "author": {
+    "name": "MarcoDotIO",
+    "url": "https://github.com/MarcoDotIO"
+  },
+  "homepage": "https://github.com/MarcoDotIO/overleaf-latex",
+  "repository": "https://github.com/MarcoDotIO/overleaf-latex",
+  "keywords": ["overleaf", "latex", "pdf", "research", "documents"],
+  "mcpServers": {
+    "overleaf": {
+      "command": "node",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/bundle/overleaf-mcp.mjs"]
+    }
+  }
+}

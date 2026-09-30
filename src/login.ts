@@ -1,9 +1,9 @@
-import { constants } from 'node:fs';
+import { constants, realpathSync } from 'node:fs';
 import { mkdtemp, open, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { chromium, type BrowserContext } from 'playwright';
+import type { BrowserContext } from 'playwright';
 import {
   buildCookieHeader, clearSession, getSessionPath, loadSession, OVERLEAF_ORIGIN,
   saveSession, sessionFromCookieHeader, type SavedSession,
@@ -92,7 +92,14 @@ export function parseLoginArguments(args: string[]): LoginOptions {
   return result;
 }
 
+/** Only interactive sign-in needs Playwright; --check, --logout and cookie import work without it. */
+async function loadChromium(): Promise<typeof import('playwright').chromium> {
+  try { return (await import('playwright')).chromium; }
+  catch { throw new Error('Playwright is not installed. Run npm ci in the plugin directory, or use --import-cookie-file; see --help.'); }
+}
+
 async function interactiveLogin(timeoutSeconds: number): Promise<void> {
+  const chromium = await loadChromium();
   const profile = await mkdtemp(join(tmpdir(), 'overleaf-latex-login-'));
   let context: BrowserContext | undefined;
   let interrupted = false;
@@ -188,7 +195,9 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
   await interactiveLogin(options.timeoutSeconds);
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
+// Node reports the entry module by its real path, so compare real paths; a
+// symlinked plugin or checkout path would otherwise skip main() and exit 0.
+if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
   main().catch(error => {
     // Only helper-generated errors are expected; never log browser or request objects.
     console.error(error instanceof Error ? error.message : 'Overleaf login failed.');

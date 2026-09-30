@@ -15,6 +15,17 @@ Overleaf MCP server ─── private session file
 https://www.overleaf.com
 ```
 
+## Plugin packaging
+
+One repository serves both plugin hosts, and both launch the same committed stdio entry point, `bundle/overleaf-mcp.mjs`. It contains only this project's code; packages load from `node_modules`, which Claude Code installs automatically and a Codex local install copies from the checkout.
+
+| Host | Manifest | MCP server entry |
+| --- | --- | --- |
+| Claude Code | `.claude-plugin/plugin.json` (with `.claude-plugin/marketplace.json`) | Inline `overleaf` server using `${CLAUDE_PLUGIN_ROOT}` |
+| Codex | `.codex-plugin/plugin.json` | Root `.mcp.json`, relative to the plugin root through `"cwd": "."` |
+
+Claude Code also reads the root `.mcp.json`, then replaces it with the same-named `overleaf` server from its manifest, so both entries must keep that name. The skill in `skills/` is shared. `commands/login.md` is Claude Code only; it runs `bundle/overleaf-login.mjs`, which imports Playwright only for interactive sign-in. `test/plugin-manifests.test.ts` checks that the manifests agree and that the committed bundle serves the same tools as the source.
+
 ## Authentication boundaries
 
 The account owner signs in interactively with Google through Overleaf. The local helper saves the resulting Overleaf cookies, not Google cookies, OAuth tokens, or browser local storage. The session file is kept outside the checkout, defaults to `~/.config/overleaf-latex/session.json`, and requires an owner-only file and directory.
