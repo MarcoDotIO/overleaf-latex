@@ -10,6 +10,8 @@ export interface OverleafApi {
   createProject(name: string, template?: 'blank' | 'example'): Promise<unknown>;
   getProject(projectId: string): Promise<unknown>;
   readDocument(projectId: string, documentId: string): Promise<unknown>;
+  /** Optional: the project tree plus every text document from one project session. */
+  readProjectSource?(projectId: string, maxDocuments?: number): Promise<{ project: unknown; documents: Record<string, unknown> }>;
   writeDocument(projectId: string, documentId: string, content: string, expectedVersion: number): Promise<unknown>;
   patchDocument?(projectId: string, documentId: string, patches: TextPatch[], expectedVersion: number): Promise<unknown>;
   restoreDocument?(projectId: string, documentId: string, content: string, expectedVersion: number, ranges: PatchPlan['ranges']): Promise<unknown>;

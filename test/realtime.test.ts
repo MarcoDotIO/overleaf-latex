@@ -217,7 +217,7 @@ test('invalid frames and malformed acknowledgement payloads fail closed', async 
 });
 
 test('join rejection, malformed project, and startup timeout reject readiness', async t => {
-  for (const [packet, code] of [[event('connectionRejected', [{ message: 'private secret' }]), 'AUTH_OR_CHALLENGE'], [event('joinProjectResponse', [{ project: [] }]), 'REALTIME_PROTOCOL'], ['', 'REALTIME_TIMEOUT']] as const) {
+  for (const [packet, code] of [[event('connectionRejected', [{ message: 'private secret' }]), 'AUTH_OR_CHALLENGE'], [event('connectionRejected', [{ message: 'rate-limit hit when joining project', code: 'TooManyRequests' }]), 'RATE_LIMITED'], [event('joinProjectResponse', [{ project: [] }]), 'REALTIME_PROTOCOL'], ['', 'REALTIME_TIMEOUT']] as const) {
     await t.test(code, async sub => {
       const { connection, peer } = await localSocket(sub, 100);
       const rejected = assert.rejects(connection.ready, errorCode(code));

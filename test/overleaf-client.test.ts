@@ -445,3 +445,34 @@ test('output download returns bounded bytes and never follows an artifact redire
   const redirect = new OverleafClient({ loadSession, fetch: async () => new Response('', { status: 302, headers: { location: 'https://evil.test/private.pdf' } }) });
   await assert.rejects(redirect.readOutput(projectId, output), errorCode('AUTH_OR_CHALLENGE'));
 });
+
+test('project source reads the tree and every document over one project session', async () => {
+  const second = '3123456789abcdef01234567';
+  const socket = new FakeSocket(async (_event, args) => snapshot(args[0] === documentId ? 'main' : 'chapter'));
+  socket.project = { _id: projectId, rootFolder: [{ _id: folderId, docs: [{ _id: documentId, name: 'main.tex' }], folders: [{ _id: folderId, docs: [{ _id: second, name: 'chapter.tex' }] }] }] } as unknown as typeof socket.project;
+  let joins = 0;
+  const client = new OverleafClient({ loadSession, timeoutMs: 300, socketFactory: async () => { joins++; return socket; } });
+  const source = await client.readProjectSource(projectId);
+  assert.equal(joins, 1);
+  assert.deepEqual(Object.keys(source.documents), [documentId, second]);
+  assert.equal(source.documents[second]!.content, 'chapter');
+  assert.equal(socket.closed, true);
+  await assert.rejects(client.readProjectSource(projectId, 1), errorCode('PROJECT_TOO_LARGE'));
+});
+
+test('a rate-limited project join is retried, and gives up with RATE_LIMITED', async () => {
+  const socket = new FakeSocket(async () => snapshot('text'));
+  let attempts = 0;
+  const flaky = new OverleafClient({ loadSession, timeoutMs: 300, joinRetryDelaysMs: [0, 0], socketFactory: async () => {
+    if (++attempts < 3) throw new OverleafError('RATE_LIMITED', 'limited');
+    return socket;
+  } });
+  assert.equal((await flaky.readDocument(projectId, documentId)).content, 'text');
+  assert.equal(attempts, 3);
+  const limited = new OverleafClient({ loadSession, timeoutMs: 300, joinRetryDelaysMs: [0], socketFactory: async () => { throw new OverleafError('RATE_LIMITED', 'limited'); } });
+  await assert.rejects(limited.readDocument(projectId, documentId), errorCode('RATE_LIMITED'));
+  let authAttempts = 0;
+  const auth = new OverleafClient({ loadSession, timeoutMs: 300, joinRetryDelaysMs: [0, 0], socketFactory: async () => { authAttempts++; throw new OverleafError('AUTH_OR_CHALLENGE', 'auth'); } });
+  await assert.rejects(auth.readDocument(projectId, documentId), errorCode('AUTH_OR_CHALLENGE'));
+  assert.equal(authAttempts, 1, 'Only rate limits are retried');
+});

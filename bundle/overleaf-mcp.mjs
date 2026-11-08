@@ -334,6 +334,12 @@ var OverleafError = class extends Error {
   code;
 };
 var AUTH_MESSAGE = "Overleaf authentication expired or the request was blocked. Run the plugin login command and finish sign-in in its browser, then retry. Browser security challenges must be completed manually.";
+var RATE_LIMIT_MESSAGE = "Overleaf is rate-limiting project connections for this account. Signing in again will not help; wait a few minutes before retrying. No document was changed.";
+function isJoinRateLimit(details) {
+  if (!details || typeof details !== "object") return false;
+  const { code, message } = details;
+  return code === "TooManyRequests" || typeof message === "string" && /rate.?limit/i.test(message);
+}
 var connectRealtime = async (options) => {
   const resource = options.resource ?? "/socket.io";
   if (options.origin !== "https://www.overleaf.com" || !/^\/[a-zA-Z0-9_.-]+(?:\/[a-zA-Z0-9_.-]+)*$/.test(resource) || resource.split("/").some((part) => part === "." || part === "..")) {
@@ -481,7 +487,7 @@ var SocketIo09Connection = class {
       const event = JSON.parse(payload);
       if (!event || typeof event !== "object" || !("name" in event) || typeof event.name !== "string" || !("args" in event) || !Array.isArray(event.args)) throw new Error("bad event");
       if (event.name === "connectionRejected") {
-        this.fail(new OverleafError("AUTH_OR_CHALLENGE", AUTH_MESSAGE));
+        this.fail(isJoinRateLimit(event.args[0]) ? new OverleafError("RATE_LIMITED", RATE_LIMIT_MESSAGE) : new OverleafError("AUTH_OR_CHALLENGE", AUTH_MESSAGE));
       } else if (event.name === "serverPing") {
         this.ws.send(`5:::${JSON.stringify({ name: "clientPong", args: [...event.args.slice(0, 4), "websocket", this.sessionId ?? null] })}`);
       } else if (event.name === "reconnectGracefully" || event.name === "forceDisconnect") {
@@ -562,11 +568,13 @@ var OverleafClient = class {
   getSession;
   socketFactory;
   timeoutMs;
+  joinRetryDelaysMs;
   constructor(options = {}) {
     this.fetchImpl = options.fetch ?? globalThis.fetch;
     this.getSession = options.loadSession ?? loadSession;
     this.socketFactory = options.socketFactory ?? connectRealtime;
     this.timeoutMs = options.timeoutMs ?? 3e4;
+    this.joinRetryDelaysMs = options.joinRetryDelaysMs ?? [5e3, 15e3, 3e4];
   }
   async listProjects() {
     const response = await this.json("/user/projects");
@@ -579,6 +587,33 @@ var OverleafClient = class {
   }
   async getProject(projectId) {
     return this.withProject(projectId, async (socket) => socket.project);
+  }
+  /**
+   * Reads the project tree and every text document over ONE project session.
+   * Opening a session per document trips Overleaf's joinProject rate limit on
+   * checked edits, which snapshot the whole project several times.
+   */
+  async readProjectSource(projectId, maxDocuments = 100) {
+    return this.withProject(projectId, async (socket) => {
+      const project2 = socket.project;
+      const ids = [];
+      const walk = (folders) => {
+        if (!Array.isArray(folders)) return;
+        for (const folder of folders) {
+          if (!isObject2(folder)) continue;
+          for (const doc of Array.isArray(folder.docs) ? folder.docs : []) if (isObject2(doc) && typeof doc._id === "string") ids.push(doc._id);
+          walk(folder.folders);
+        }
+      };
+      walk(project2.rootFolder);
+      if (ids.length > maxDocuments) throw new OverleafError("PROJECT_TOO_LARGE", `Checked edits support projects with at most ${maxDocuments} text files.`);
+      const documents = {};
+      for (const id2 of ids) {
+        validateId(id2);
+        documents[id2] = await this.joinDocument(socket, id2);
+      }
+      return { project: project2, documents };
+    });
   }
   async readDocument(projectId, documentId) {
     validateId(documentId);
@@ -726,7 +761,17 @@ var OverleafClient = class {
     const session = await this.getSession();
     const cookie = buildCookieHeader(session, `${OVERLEAF_ORIGIN2}/socket.io`);
     if (!cookie) throw new OverleafError("AUTH_OR_CHALLENGE", AUTH_MESSAGE);
-    const socket = await this.socketFactory({ projectId, cookie, origin: OVERLEAF_ORIGIN2, fetch: this.fetchImpl, timeoutMs: this.timeoutMs });
+    let socket;
+    for (let attempt = 0; ; attempt++) {
+      try {
+        socket = await this.socketFactory({ projectId, cookie, origin: OVERLEAF_ORIGIN2, fetch: this.fetchImpl, timeoutMs: this.timeoutMs });
+        break;
+      } catch (error) {
+        const delay = this.joinRetryDelaysMs[attempt];
+        if (!(error instanceof OverleafError && error.code === "RATE_LIMITED") || delay === void 0) throw error;
+        await new Promise((resolve2) => setTimeout(resolve2, delay));
+      }
+    }
     try {
       return await action(socket);
     } finally {
@@ -989,7 +1034,8 @@ var EditWorkflow = class {
     };
   }
   async projectSnapshot(projectId, rootOverride) {
-    const project2 = asObject(await this.raw.getProject(projectId));
+    const source = this.raw.readProjectSource ? await this.raw.readProjectSource(projectId, 100) : void 0;
+    const project2 = asObject(source ? source.project : await this.raw.getProject(projectId));
     const ids = [];
     const walk = (folders) => folders.map((folder) => ({
       id: folder._id,
@@ -1007,7 +1053,7 @@ var EditWorkflow = class {
     const documents = {};
     let bytes = 0;
     for (let i = 0; i < ids.length; i += 4) {
-      for (const [id2, doc] of await Promise.all(ids.slice(i, i + 4).map(async (id3) => [id3, snapshot(await this.raw.readDocument(projectId, id3))]))) {
+      for (const [id2, doc] of await Promise.all(ids.slice(i, i + 4).map(async (id3) => [id3, snapshot(source ? source.documents[id3] : await this.raw.readDocument(projectId, id3))]))) {
         bytes += Buffer.byteLength(doc.content);
         if (bytes > 8 * 1024 * 1024) throw new Error("Project source exceeds the 8 MiB checked-edit limit.");
         documents[id2] = doc;
