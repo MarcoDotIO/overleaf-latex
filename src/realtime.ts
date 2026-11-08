@@ -29,6 +29,14 @@ export class OverleafError extends Error {
 }
 
 export const AUTH_MESSAGE = 'Overleaf authentication expired or the request was blocked. Run the plugin login command and finish sign-in in its browser, then retry. Browser security challenges must be completed manually.';
+export const RATE_LIMIT_MESSAGE = 'Overleaf is rate-limiting project connections for this account. Signing in again will not help; wait a few minutes before retrying. No document was changed.';
+
+/** Overleaf rejects joinProject with code TooManyRequests when one account opens project sessions too quickly. */
+export function isJoinRateLimit(details: unknown): boolean {
+  if (!details || typeof details !== 'object') return false;
+  const { code, message } = details as { code?: unknown; message?: unknown };
+  return code === 'TooManyRequests' || (typeof message === 'string' && /rate.?limit/i.test(message));
+}
 
 export const connectRealtime: SocketFactory = async options => {
   const resource = options.resource ?? '/socket.io';
@@ -167,7 +175,8 @@ export class SocketIo09Connection implements RealtimeConnection {
       const event: unknown = JSON.parse(payload);
       if (!event || typeof event !== 'object' || !('name' in event) || typeof event.name !== 'string' || !('args' in event) || !Array.isArray(event.args)) throw new Error('bad event');
       if (event.name === 'connectionRejected') {
-        this.fail(new OverleafError('AUTH_OR_CHALLENGE', AUTH_MESSAGE));
+        // The reason is matched but never surfaced, so Overleaf's free text cannot leak into tool output.
+        this.fail(isJoinRateLimit(event.args[0]) ? new OverleafError('RATE_LIMITED', RATE_LIMIT_MESSAGE) : new OverleafError('AUTH_OR_CHALLENGE', AUTH_MESSAGE));
       } else if (event.name === 'serverPing') {
         // Overleaf adds its own diagnostics heartbeat on top of Socket.IO's 2:: heartbeat.
         this.ws.send(`5:::${JSON.stringify({ name: 'clientPong', args: [...event.args.slice(0, 4), 'websocket', this.sessionId ?? null] })}`);

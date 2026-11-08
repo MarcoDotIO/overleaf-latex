@@ -431,3 +431,18 @@ test('a small patch in JSON-escaped source cannot start writing if its recovery 
   assert.equal(fixture.writes.length, 0);
   assert.deepEqual([...fixture.docs], before);
 });
+
+test('snapshots use one project session per snapshot when the adapter offers readProjectSource', async t => {
+  const fixture = new ProjectFixture();
+  let sourceReads = 0;
+  const api = Object.assign(fixture, {
+    async readProjectSource() {
+      sourceReads++;
+      return { project: await fixture.getProject(), documents: Object.fromEntries([...fixture.docs].map(([id, doc]) => [id, { ...doc }])) };
+    },
+  });
+  const result = await api.workflow(t).editProject(PROJECT, { changes: [change(fixture)] });
+  assert.equal(result.status, 'success');
+  assert.equal(fixture.reads.length, 0, 'No per-document sessions during snapshots');
+  assert.ok(sourceReads >= 5 && sourceReads <= 8, `Expected a handful of whole-project reads, got ${sourceReads}`);
+});

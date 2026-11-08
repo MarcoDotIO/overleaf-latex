@@ -16,6 +16,8 @@ export interface ClientOptions {
   loadSession?: () => Promise<Session>;
   socketFactory?: SocketFactory;
   timeoutMs?: number;
+  /** Waits before re-joining a project after Overleaf's join rate limit; joining is read-only, so retrying is safe. */
+  joinRetryDelaysMs?: number[];
 }
 
 export interface DocumentSnapshot {
@@ -46,12 +48,14 @@ export class OverleafClient {
   private readonly getSession: () => Promise<Session>;
   private readonly socketFactory: SocketFactory;
   private readonly timeoutMs: number;
+  private readonly joinRetryDelaysMs: number[];
 
   constructor(options: ClientOptions = {}) {
     this.fetchImpl = options.fetch ?? globalThis.fetch;
     this.getSession = options.loadSession ?? loadSession;
     this.socketFactory = options.socketFactory ?? connectRealtime;
     this.timeoutMs = options.timeoutMs ?? 30_000;
+    this.joinRetryDelaysMs = options.joinRetryDelaysMs ?? [5_000, 15_000, 30_000];
   }
 
   async listProjects(): Promise<JsonObject[]> {
@@ -67,6 +71,31 @@ export class OverleafClient {
 
   async getProject(projectId: string): Promise<JsonObject> {
     return this.withProject(projectId, async socket => socket.project);
+  }
+
+  /**
+   * Reads the project tree and every text document over ONE project session.
+   * Opening a session per document trips Overleaf's joinProject rate limit on
+   * checked edits, which snapshot the whole project several times.
+   */
+  async readProjectSource(projectId: string, maxDocuments = 100): Promise<{ project: JsonObject; documents: Record<string, DocumentSnapshot> }> {
+    return this.withProject(projectId, async socket => {
+      const project = socket.project as JsonObject;
+      const ids: string[] = [];
+      const walk = (folders: unknown): void => {
+        if (!Array.isArray(folders)) return;
+        for (const folder of folders) {
+          if (!isObject(folder)) continue;
+          for (const doc of Array.isArray(folder.docs) ? folder.docs : []) if (isObject(doc) && typeof doc._id === 'string') ids.push(doc._id);
+          walk(folder.folders);
+        }
+      };
+      walk(project.rootFolder);
+      if (ids.length > maxDocuments) throw new OverleafError('PROJECT_TOO_LARGE', `Checked edits support projects with at most ${maxDocuments} text files.`);
+      const documents: Record<string, DocumentSnapshot> = {};
+      for (const id of ids) { validateId(id); documents[id] = await this.joinDocument(socket, id); }
+      return { project, documents };
+    });
   }
 
   async readDocument(projectId: string, documentId: string): Promise<DocumentSnapshot> {
@@ -223,7 +252,16 @@ export class OverleafClient {
     const session = await this.getSession();
     const cookie = buildCookieHeader(session, `${OVERLEAF_ORIGIN}/socket.io`);
     if (!cookie) throw new OverleafError('AUTH_OR_CHALLENGE', AUTH_MESSAGE);
-    const socket = await this.socketFactory({ projectId, cookie, origin: OVERLEAF_ORIGIN, fetch: this.fetchImpl, timeoutMs: this.timeoutMs });
+    let socket: RealtimeConnection;
+    for (let attempt = 0; ; attempt++) {
+      try { socket = await this.socketFactory({ projectId, cookie, origin: OVERLEAF_ORIGIN, fetch: this.fetchImpl, timeoutMs: this.timeoutMs }); break; }
+      catch (error) {
+        // Only the join is retried: nothing has been sent to the project yet.
+        const delay = this.joinRetryDelaysMs[attempt];
+        if (!(error instanceof OverleafError && error.code === 'RATE_LIMITED') || delay === undefined) throw error;
+        await new Promise(resolve => setTimeout(resolve, delay));
+      }
+    }
     try { return await action(socket); } finally { socket.close(); }
   }
 

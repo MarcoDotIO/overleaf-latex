@@ -93,7 +93,9 @@ export class EditWorkflow {
   }
 
   private async projectSnapshot(projectId: string, rootOverride?: string): Promise<ProjectSnapshot> {
-    const project = asObject(await this.raw.getProject(projectId));
+    // One project session for the whole snapshot when the adapter supports it (see readProjectSource).
+    const source = this.raw.readProjectSource ? await this.raw.readProjectSource(projectId, 100) : undefined;
+    const project = asObject(source ? source.project : await this.raw.getProject(projectId));
     const ids: string[] = [];
     const walk = (folders: any[]): unknown[] => folders.map(folder => ({ id: folder._id, name: folder.name,
       docs: (folder.docs ?? []).map((doc: any) => { ids.push(doc._id); return { id: doc._id, name: doc.name }; }),
@@ -106,7 +108,7 @@ export class EditWorkflow {
     const documents: Record<string, Snapshot> = {};
     let bytes = 0;
     for (let i = 0; i < ids.length; i += 4) {
-      for (const [id, doc] of await Promise.all(ids.slice(i, i + 4).map(async id => [id, snapshot(await this.raw.readDocument(projectId, id))] as const))) {
+      for (const [id, doc] of await Promise.all(ids.slice(i, i + 4).map(async id => [id, snapshot(source ? source.documents[id] : await this.raw.readDocument(projectId, id))] as const))) {
         bytes += Buffer.byteLength(doc.content);
         if (bytes > 8 * 1024 * 1024) throw new Error('Project source exceeds the 8 MiB checked-edit limit.');
         documents[id] = doc;
